@@ -816,6 +816,8 @@ You are a Windows PC performance expert. Analyze this system health report and p
 5. A "before your next video call" quick checklist
 
 Be specific and actionable. Reference the actual values from the report.
+Use short headers (## Header), numbered lists, and bullet points.
+Keep it concise. No filler. No disclaimers.
 
 --- SYSTEM REPORT ---
 $reportText
@@ -994,7 +996,40 @@ if ($Analyze) {
             }
         }
 
-        Write-Host $result
+        # Render markdown-ish output with basic terminal formatting
+        $resultStr = ($result | Out-String).Trim()
+        foreach ($line in $resultStr -split "`n") {
+            $trimmed = $line.TrimEnd()
+            if ($trimmed -match '^#{1,3}\s+(.+)') {
+                # Headers
+                Write-Host ""
+                Write-Host "  $($Matches[1])" -ForegroundColor Cyan
+                Write-Host "  $("─" * $Matches[1].Length)" -ForegroundColor DarkGray
+            } elseif ($trimmed -match '^\*\*(.+?)\*\*(.*)') {
+                # Bold start of line
+                Write-Host "  $($Matches[1])" -ForegroundColor White -NoNewline
+                Write-Host $Matches[2] -ForegroundColor Gray
+            } elseif ($trimmed -match '^[-*]\s+(.+)') {
+                # Bullet points
+                Write-Host "  · $($Matches[1])" -ForegroundColor Gray
+            } elseif ($trimmed -match '^\d+\.\s+(.+)') {
+                # Numbered list
+                $num = ($trimmed -split '\.')[0]
+                Write-Host "  $num. " -ForegroundColor Cyan -NoNewline
+                Write-Host ($trimmed -replace '^\d+\.\s+', '') -ForegroundColor Gray
+            } elseif ($trimmed -match '^```') {
+                # Code block delimiter (skip)
+            } elseif ($trimmed -match '^>') {
+                # Blockquote
+                Write-Host "  │ $($trimmed -replace '^>\s*', '')" -ForegroundColor DarkYellow
+            } elseif ($trimmed -eq '') {
+                Write-Host ""
+            } else {
+                # Regular text, render inline **bold** and `code`
+                $formatted = $trimmed -replace '\*\*(.+?)\*\*', '$1' -replace '`(.+?)`', '$1'
+                Write-Host "  $formatted" -ForegroundColor Gray
+            }
+        }
     } catch {
         Write-Host "  ✗ Error running $($selectedAi['Desc']): $_" -ForegroundColor Red
         Write-Host "    Falling back: report copied to clipboard." -ForegroundColor Yellow
