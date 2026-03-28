@@ -795,11 +795,11 @@ $aiChecks = @(
     @{ Name = "llm";      Cmd = "llm";              Desc = "LLM CLI (Simon Willison)" }
 )
 
-foreach ($ai in $aiChecks) {
-    $cmdName = $ai["Cmd"]
+foreach ($aiEntry in $aiChecks) {
+    $cmdName = $aiEntry["Cmd"]
     if ($cmdName) {
         $found = Get-Command $cmdName -ErrorAction SilentlyContinue
-        if ($found) { $aiTools[$ai["Name"]] = $ai }
+        if ($found) { $aiTools[$aiEntry["Name"]] = $aiEntry }
     }
 }
 
@@ -832,10 +832,10 @@ if (-not $Report) {
         Write-Host " │" -ForegroundColor Blue
         Write-Host "  ├────────────────────────────────────────────────────────────────┤" -ForegroundColor Blue
         foreach ($key in $aiTools.Keys) {
-            $ai = $aiTools[$key]
+            $tool = $aiTools[$key]
             Write-Host "  │  " -ForegroundColor Blue -NoNewline
-            Write-Host "● $($ai.Desc.PadRight(20))" -ForegroundColor Green -NoNewline
-            Write-Host "$($ai.Cmd.PadRight(40))" -ForegroundColor Gray -NoNewline
+            Write-Host "● $("$($tool['Desc'])".PadRight(20))" -ForegroundColor Green -NoNewline
+            Write-Host "$("$($tool['Cmd'])".PadRight(40))" -ForegroundColor Gray -NoNewline
             Write-Host " │" -ForegroundColor Blue
         }
         Write-Host "  ├────────────────────────────────────────────────────────────────┤" -ForegroundColor Blue
@@ -921,11 +921,11 @@ if ($Analyze) {
         return
     }
 
-    Write-Host "  ● Analyzing with $($selectedAi.Desc)..." -ForegroundColor Cyan
+    Write-Host "  ● Analyzing with $($selectedAi['Desc'])..." -ForegroundColor Cyan
 
     $modelArg = ""
 
-    switch ($selectedAi.Name) {
+    switch ($selectedAi['Name']) {
         "claude" {
             # Claude Code: claude -p "prompt"
             $escapedPrompt = $aiPrompt -replace '"', '\"'
@@ -957,7 +957,7 @@ if ($Analyze) {
             $cmd = "echo `"$($aiPrompt -replace '"', '\"')`" | llm $modelFlag"
         }
         default {
-            $cmd = "echo `"$($aiPrompt -replace '"', '\"')`" | $($selectedAi.Cmd)"
+            $cmd = "echo `"$($aiPrompt -replace '"', '\"')`" | $($selectedAi['Cmd'])"
         }
     }
 
@@ -968,7 +968,7 @@ if ($Analyze) {
     $aiPrompt | Out-File -FilePath $tempPrompt -Encoding UTF8
 
     try {
-        switch ($selectedAi.Name) {
+        switch ($selectedAi['Name']) {
             "claude" {
                 $result = Get-Content $tempPrompt -Raw | & claude -p 2>&1
             }
@@ -990,13 +990,13 @@ if ($Analyze) {
                 $result = Get-Content $tempPrompt -Raw | & llm @modelFlag 2>&1
             }
             default {
-                $result = Get-Content $tempPrompt -Raw | & $selectedAi.Cmd 2>&1
+                $result = Get-Content $tempPrompt -Raw | & $selectedAi['Cmd'] 2>&1
             }
         }
 
         Write-Host $result
     } catch {
-        Write-Host "  ✗ Error running $($selectedAi.Desc): $_" -ForegroundColor Red
+        Write-Host "  ✗ Error running $($selectedAi['Desc']): $_" -ForegroundColor Red
         Write-Host "    Falling back: report copied to clipboard." -ForegroundColor Yellow
         $aiPrompt | Set-Clipboard
     } finally {
