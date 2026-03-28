@@ -1,0 +1,112 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="980" viewBox="0 0 860 980">
+  <defs>
+    <filter id="shadow" x="-5%" y="-3%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#000" flood-opacity="0.45"/>
+    </filter>
+    <linearGradient id="titleGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1c2128"/>
+      <stop offset="100%" stop-color="#161b22"/>
+    </linearGradient>
+    <style>
+      text {
+        font-family: 'Cascadia Code', 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas', monospace;
+        font-size: 12.5px;
+        line-height: 1.6;
+      }
+      .c  { fill: #79c0ff; }
+      .w  { fill: #e6edf3; }
+      .g  { fill: #8b949e; }
+      .dg { fill: #484f58; }
+      .gn { fill: #3fb950; }
+      .yl { fill: #e3b341; }
+      .rd { fill: #f85149; }
+      .mg { fill: #d2a8ff; }
+      .dc { fill: #58a6ff; }
+      .bl { fill: #58a6ff; }
+    </style>
+  </defs>
+
+  <!-- Outer background for padding -->
+  <rect width="860" height="980" rx="0" fill="#010409"/>
+
+  <!-- Terminal window with shadow -->
+  <g filter="url(#shadow)">
+    <rect x="20" y="20" width="820" height="940" rx="10" fill="#0d1117" stroke="#30363d" stroke-width="1"/>
+  </g>
+
+  <!-- Title bar gradient -->
+  <rect x="20" y="20" width="820" height="40" rx="10" fill="url(#titleGrad)"/>
+  <rect x="20" y="48" width="820" height="12" fill="#161b22"/>
+  <line x1="20" y1="60" x2="840" y2="60" stroke="#30363d" stroke-width="0.5"/>
+
+  <!-- Traffic lights -->
+  <circle cx="44" cy="40" r="6" fill="#ff5f57"/>
+  <circle cx="64" cy="40" r="6" fill="#febc2e"/>
+  <circle cx="84" cy="40" r="6" fill="#28c840"/>
+  <text x="104" y="44" fill="#8b949e" font-size="12">PowerShell — .\checkup.ps1</text>
+
+  <!-- Content area -->
+  <g transform="translate(34, 80)">
+    <!-- Prompt line -->
+    <text y="0"><tspan class="dg">PS C:\winpulse&gt;</tspan> <tspan class="w">.\checkup.ps1</tspan></text>
+
+    <!-- Banner -->
+    <text y="36" class="c">  ╔══════════════════════════════════════════════════════════════╗</text>
+    <text y="54" class="c">  ║                                                              ║</text>
+    <text y="72" class="c">  ║<tspan class="w">              PC CHECKUP  ·  Health &amp; Performance            </tspan>║</text>
+    <text y="90" class="c">  ║<tspan class="dg">              ─────────────────────────────────              </tspan>║</text>
+    <text y="108" class="c">  ╚══════════════════════════════════════════════════════════════╝</text>
+
+    <!-- System Overview -->
+    <text y="144" class="dc">  ┌────────────────────────────────────────────────────────────┐</text>
+    <text y="162" class="dc">  │ <tspan class="c">SYSTEM OVERVIEW</tspan><tspan class="dc">                                             │</tspan></text>
+    <text y="180" class="dc">  └────────────────────────────────────────────────────────────┘</text>
+    <text y="198"><tspan class="gn">    ✓ </tspan><tspan class="w">Machine                         </tspan><tspan class="g">ASUS Zenbook S 16</tspan></text>
+    <text y="216"><tspan class="dg">    ● </tspan><tspan class="w">CPU                             </tspan><tspan class="g">AMD Ryzen AI 9 HX 370</tspan></text>
+    <text y="234"><tspan class="dg">    ● </tspan><tspan class="w">GPU                             </tspan><tspan class="g">AMD Radeon 890M</tspan></text>
+    <text y="252"><tspan class="gn">    ✓ </tspan><tspan class="w">Disk                            </tspan><tspan class="g">954 GB SSD (Healthy)</tspan></text>
+
+    <!-- Memory -->
+    <text y="288" class="dc">  ┌────────────────────────────────────────────────────────────┐</text>
+    <text y="306" class="dc">  │ <tspan class="c">MEMORY</tspan><tspan class="dc">                                                      │</tspan></text>
+    <text y="324" class="dc">  └────────────────────────────────────────────────────────────┘</text>
+    <text y="342"><tspan class="gn">    ✓ </tspan><tspan class="w">Total RAM                       </tspan><tspan class="g">31.1 GB</tspan></text>
+    <text y="360"><tspan class="yl">    ▲ </tspan><tspan class="w">Used                            </tspan><tspan class="g">20.8 GB (67%)</tspan><tspan class="yl">  High idle usage</tspan></text>
+    <text y="378"><tspan class="yl">    ▲ </tspan><tspan class="w">Memory Compression              </tspan><tspan class="g">1349 MB</tspan><tspan class="yl">  Under pressure</tspan></text>
+
+    <!-- Thermals -->
+    <text y="414" class="dc">  ┌────────────────────────────────────────────────────────────┐</text>
+    <text y="432" class="dc">  │ <tspan class="c">THERMALS &amp; CPU</tspan><tspan class="dc">                                              │</tspan></text>
+    <text y="450" class="dc">  └────────────────────────────────────────────────────────────┘</text>
+    <text y="468"><tspan class="rd">    ✗ </tspan><tspan class="w">Thermal Throttling              </tspan><tspan class="g">5+ events in 7d</tspan><tspan class="yl">  Overheating!</tspan></text>
+    <text y="486"><tspan class="gn">    ✓ </tspan><tspan class="w">CPU Load (now)                  </tspan><tspan class="g">3%</tspan></text>
+
+    <!-- Security -->
+    <text y="522" class="dc">  ┌────────────────────────────────────────────────────────────┐</text>
+    <text y="540" class="dc">  │ <tspan class="c">SECURITY &amp; VIRTUALIZATION</tspan><tspan class="dc">                                   │</tspan></text>
+    <text y="558" class="dc">  └────────────────────────────────────────────────────────────┘</text>
+    <text y="576"><tspan class="yl">    ▲ </tspan><tspan class="w">VBS                             </tspan><tspan class="g">ENABLED</tspan><tspan class="yl">  5-15% CPU overhead</tspan></text>
+    <text y="594"><tspan class="yl">    ▲ </tspan><tspan class="w">HVCI (Memory Integrity)         </tspan><tspan class="g">ENABLED</tspan><tspan class="yl">  Core Isolation</tspan></text>
+
+    <!-- Summary -->
+    <text y="630" class="yl">  ╔══════════════════════════════════════════════════════════════╗</text>
+    <text y="648" class="yl">  ║  SUMMARY: 1 issues, 16 warnings (8.5s)                       ║</text>
+    <text y="666" class="yl">  ╚══════════════════════════════════════════════════════════════╝</text>
+
+    <!-- Quick Wins -->
+    <text y="702" class="mg">  ┌────────────────────────────────────────────────────────────────┐</text>
+    <text y="720" class="mg">  │ <tspan class="w">QUICK WINS</tspan><tspan class="mg">                                                     │</tspan></text>
+    <text y="738" class="mg">  ├────────────────────────────────────────────────────────────────┤</text>
+    <text y="756" class="mg">  │  <tspan class="c">1.</tspan><tspan class="g"> Turn off Memory Integrity for 5-15% CPU gain</tspan><tspan class="mg">                │</tspan></text>
+    <text y="774" class="mg">  │  <tspan class="c">2.</tspan><tspan class="g"> Create .wslconfig to cap WSL2 memory</tspan><tspan class="mg">                         │</tspan></text>
+    <text y="792" class="mg">  │  <tspan class="c">3.</tspan><tspan class="g"> Disable HW accel in Electron apps</tspan><tspan class="mg">                            │</tspan></text>
+    <text y="810" class="mg">  │  <tspan class="c">4.</tspan><tspan class="g"> Switch to Best Performance for calls</tspan><tspan class="mg">                          │</tspan></text>
+    <text y="828" class="mg">  └────────────────────────────────────────────────────────────────┘</text>
+
+    <!-- AI box -->
+    <text y="864" class="bl">  ┌────────────────────────────────────────────────────────────────┐</text>
+    <text y="882" class="bl">  │ <tspan class="w">AI TOOLS DETECTED</tspan><tspan class="bl">                                              │</tspan></text>
+    <text y="900" class="bl">  │  <tspan class="gn">● Claude Code</tspan><tspan class="g">              .\checkup.ps1 -Analyze</tspan><tspan class="bl">               │</tspan></text>
+    <text y="918" class="bl">  └────────────────────────────────────────────────────────────────┘</text>
+  </g>
+</svg>
