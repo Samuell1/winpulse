@@ -2,13 +2,18 @@
 
 **One-command Windows health check with AI-powered analysis.**
 
-A terminal diagnostic tool that scans your Windows notebook for performance drains, thermal issues, memory pressure, security overhead, and startup bloat. Outputs a clean report you can feed directly to an AI (Claude, ChatGPT, Codex, Ollama) for instant optimization advice.
+Scans your Windows notebook for 15 categories of performance issues (thermals, memory pressure, security overhead, startup bloat, and more), then pipes the results to any AI for instant, personalized optimization advice. Works with Claude, ChatGPT, Codex, Ollama, or any AI CLI you have installed.
 
-> Zero install. Single file. Read-only (never changes your settings).
+> Zero install. Single file. Read-only (never changes your settings). AI-ready output.
 
 ![PowerShell](https://img.shields.io/badge/PowerShell-5.1+-blue?logo=powershell&logoColor=white)
 ![Windows](https://img.shields.io/badge/Windows-10%2F11-0078D6?logo=windows&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
+
+![Claude](https://img.shields.io/badge/Claude-AI%20Ready-D97706?logo=anthropic&logoColor=white)
+![ChatGPT](https://img.shields.io/badge/ChatGPT-Compatible-74aa9c?logo=openai&logoColor=white)
+![Ollama](https://img.shields.io/badge/Ollama-Local%20AI-000000?logo=ollama&logoColor=white)
+![Codex](https://img.shields.io/badge/Codex-CLI%20Ready-412991?logo=openai&logoColor=white)
 
 ## Preview
 
@@ -56,7 +61,21 @@ Or double click `checkup.cmd`.
 
 ## AI integration
 
-WinPulse auto-detects locally installed AI CLIs and can pipe the full report for instant analysis.
+WinPulse is built AI-first. Every scan generates a structured, prompt-engineered report designed for LLM consumption. The AI receives your full system state and returns a prioritized action plan.
+
+```
+┌──────────┐     ┌───────────────┐     ┌──────────────┐     ┌──────────────────┐
+│  Scan PC │ ──▶ │ Build Report  │ ──▶ │ Detect AI    │ ──▶ │ Get Analysis    │
+│  (8-10s) │     │ (15 sections) │     │ (auto/manual)│     │ (personalized)  │
+└──────────┘     └───────────────┘     └──────────────┘     └──────────────────┘
+```
+
+The report includes a system prompt that instructs the AI to:
+1. Give a health score (1-10) with a one-line verdict
+2. Rank the top 3 most impactful fixes by performance gain
+3. Provide exact steps for each fix
+4. Identify what's fine and can be ignored
+5. Generate a "before your next video call" checklist
 
 ### Supported AI tools
 
