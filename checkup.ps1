@@ -194,9 +194,17 @@ Write-Metric "OS" "$($os.Caption) (Build $($os.BuildNumber))"
 Write-Metric "CPU" "$($cpu.Name.Trim())" -Status "info"
 Write-Metric "Cores / Threads" "$($cpu.NumberOfCores) / $($cpu.NumberOfLogicalProcessors)" -Status "info"
 
+# Win32_VideoController.AdapterRAM is a 32-bit value (caps at 4 GB); the
+# driver registry key stores the real size as a 64-bit qwMemorySize.
+$gpuRegSizes = @{}
+Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\0*" -ErrorAction SilentlyContinue |
+    Where-Object { $_.'HardwareInformation.qwMemorySize' -gt 0 } |
+    ForEach-Object { $gpuRegSizes[$_.DriverDesc] = $_.'HardwareInformation.qwMemorySize' }
+
 foreach ($g in $gpu) {
-    $vramMB = if ($g.AdapterRAM -gt 0) { [math]::Round($g.AdapterRAM / 1MB, 0) } else { 0 }
-    $vramStr = if ($vramMB -gt 0) { " ($vramMB MB)" } else { "" }
+    $vramBytes = if ($gpuRegSizes.ContainsKey($g.Name)) { $gpuRegSizes[$g.Name] }
+                 elseif ($g.AdapterRAM -gt 0) { $g.AdapterRAM } else { 0 }
+    $vramStr = if ($vramBytes -gt 0) { " ($(Get-FriendlySize $vramBytes))" } else { "" }
     Write-Metric "GPU" "$($g.Name)$vramStr" -Status "info"
 }
 
@@ -258,6 +266,19 @@ if ($pagefile) {
     $pfUsePct = if ($pagefile.AllocatedBaseSize -gt 0) { [math]::Round(($pagefile.CurrentUsage / $pagefile.AllocatedBaseSize) * 100, 0) } else { 0 }
     $pfStatus = if ($pfUsePct -ge 80) { "warn" } else { "ok" }
     Write-Metric "Pagefile" "$($pagefile.CurrentUsage) MB / $($pagefile.AllocatedBaseSize) MB ($pfUsePct%)" -Status $pfStatus
+}
+
+# RAM configuration (single-channel is a major performance drain)
+$dimms = @(Get-CimInstance Win32_PhysicalMemory -ErrorAction SilentlyContinue)
+if ($dimms.Count -gt 0) {
+    $runSpeed   = ($dimms | Select-Object -First 1).ConfiguredClockSpeed
+    $ratedSpeed = ($dimms | Measure-Object Speed -Maximum).Maximum
+    $dimmStatus = if ($dimms.Count -eq 1) { "warn" } else { "ok" }
+    $dimmNote   = if ($dimms.Count -eq 1) { "Single stick = single channel, big performance hit" } else { "" }
+    Write-Metric "RAM Config" "$($dimms.Count) stick(s) @ ${runSpeed} MHz" -Status $dimmStatus -Note $dimmNote
+    if ($ratedSpeed -gt $runSpeed) {
+        Write-Metric "RAM Speed" "Running ${runSpeed} MHz, rated ${ratedSpeed} MHz" -Status "warn" -Note "Enable XMP/EXPO in BIOS"
+    }
 }
 
 Write-SubHeader "Top memory consumers"
@@ -330,25 +351,112 @@ try {
     }
 } catch {}
 
+# Fallback: Thermal Zone perf counter (sometimes readable without admin)
 if (-not $tempFound) {
-    Write-Metric "Temperature" "Not available (needs admin or HWiNFO)" -Status "info"
+    try {
+        $tzSamples = (Get-Counter '\Thermal Zone Information(*)\Temperature' -ErrorAction Stop).CounterSamples
+        foreach ($s in $tzSamples) {
+            $tempC = [math]::Round($s.CookedValue - 273.15, 1)
+            if ($tempC -gt 0 -and $tempC -lt 120) {
+                $tempStatus = if ($tempC -ge 90) { "bad" } elseif ($tempC -ge 75) { "warn" } else { "ok" }
+                Write-Metric "Temperature ($($s.InstanceName))" "${tempC}°C" -Status $tempStatus
+                $tempFound = $true
+            }
+        }
+    } catch {}
 }
 
-# Thermal throttling from Event Log
-try {
-    $throttleEvents = Get-WinEvent -FilterHashtable @{
-        LogName   = 'System'
-        Id        = 37    # Kernel-Processor-Power throttling event
-        StartTime = (Get-Date).AddDays(-7)
-    } -MaxEvents 5 -ErrorAction SilentlyContinue
-
-    if ($throttleEvents) {
-        Write-Metric "Thermal Throttling" "$($throttleEvents.Count)+ events in last 7 days" -Status "bad" -Note "CPU is overheating regularly"
-    } else {
-        Write-Metric "Thermal Throttling" "No events in last 7 days" -Status "ok"
+# Fallback: LibreHardwareMonitor / OpenHardwareMonitor WMI (app must be running)
+if (-not $tempFound) {
+    foreach ($ns in @("root\LibreHardwareMonitor", "root\OpenHardwareMonitor")) {
+        try {
+            $sensors = @(Get-CimInstance -Namespace $ns -ClassName Sensor -ErrorAction Stop |
+                Where-Object { $_.SensorType -eq 'Temperature' -and $_.Name -match 'CPU|Core|Tctl|Tdie|Package' })
+            foreach ($s in $sensors | Sort-Object Value -Descending | Select-Object -First 1) {
+                $tempC = [math]::Round($s.Value, 1)
+                if ($tempC -gt 0 -and $tempC -lt 120) {
+                    $tempStatus = if ($tempC -ge 90) { "bad" } elseif ($tempC -ge 75) { "warn" } else { "ok" }
+                    Write-Metric "Temperature ($($s.Name))" "${tempC}°C" -Status $tempStatus
+                    $tempFound = $true
+                }
+            }
+            if ($tempFound) { break }
+        } catch {}
     }
+}
+
+# Fallback: HWiNFO sensors published to registry (Settings > "Enable VSB")
+if (-not $tempFound) {
+    $vsb = Get-ItemProperty "HKCU:\SOFTWARE\HWiNFO64\VSB" -ErrorAction SilentlyContinue
+    if ($vsb) {
+        $props = $vsb.PSObject.Properties | Where-Object { $_.Name -match '^Label\d+$' -and $_.Value -match 'CPU|Tctl|Tdie' }
+        foreach ($p in $props | Select-Object -First 1) {
+            $idx = $p.Name -replace 'Label', ''
+            $valStr = $vsb."Value$idx"
+            if ($valStr -match '([\d,.]+)') {
+                $tempC = [double]($Matches[1] -replace ',', '.')
+                if ($tempC -gt 0 -and $tempC -lt 120) {
+                    $tempStatus = if ($tempC -ge 90) { "bad" } elseif ($tempC -ge 75) { "warn" } else { "ok" }
+                    Write-Metric "Temperature ($($p.Value))" "${tempC}°C" -Status $tempStatus
+                    $tempFound = $true
+                }
+            }
+        }
+    }
+}
+
+if (-not $tempFound) {
+    Write-Metric "Temperature" "Not exposed by this board's firmware" -Status "info" -Note "Run LibreHardwareMonitor or HWiNFO to provide it (admin alone won't help)"
+}
+
+# Thermal throttling — multi-signal check
+# Signal 1: event log. Provider MUST be pinned: Id 37 is also used by
+# Time-Service (NTP sync) and others; unpinned Id filters count unrelated events.
+# Id 55 from Kernel-Processor-Power is a per-core informational capabilities dump
+# at every boot on many builds, so only Warning/Error level (Level <= 3) counts.
+$throttleEvents = $null   # $null = query failed; empty array = no events
+try {
+    $throttleEvents = @(Get-WinEvent -FilterHashtable @{
+        LogName      = 'System'
+        ProviderName = 'Microsoft-Windows-Kernel-Processor-Power'
+        Id           = @(37, 55)
+        StartTime    = (Get-Date).AddDays(-7)
+    } -ErrorAction Stop) | Where-Object { $_.Level -ge 1 -and $_.Level -le 3 }
+    $throttleEvents = @($throttleEvents)
 } catch {
+    if ($_.Exception.Message -match 'No events were found') { $throttleEvents = @() }
+}
+
+# Signal 2: live clock ratio. Win32_Processor.CurrentClockSpeed is often pinned
+# to base clock on modern CPUs, so prefer the perf counter (boost can exceed 100%).
+$clockPct = $null
+try {
+    $clockPct = [math]::Round((Get-Counter '\Processor Information(_Total)\% Processor Performance' -ErrorAction Stop).CounterSamples[0].CookedValue, 0)
+} catch {
+    # counter name is localized on non-English Windows; fall back to WMI ratio
+    try {
+        $cpuNow = Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -First 1
+        if ($cpuNow.MaxClockSpeed -gt 0) {
+            $clockPct = [math]::Round(($cpuNow.CurrentClockSpeed / $cpuNow.MaxClockSpeed) * 100, 0)
+        }
+    } catch {}
+}
+
+if ($null -eq $throttleEvents) {
     Write-Metric "Thermal Throttling" "Could not check event log" -Status "info"
+} elseif ($throttleEvents.Count -gt 0) {
+    $liveNote = if ($null -ne $clockPct -and $clockPct -lt 80) {
+        "CPU throttled now (clock at ${clockPct}% of nominal) and $($throttleEvents.Count) firmware-limit event(s) in 7 days"
+    } else {
+        "$($throttleEvents.Count) firmware-limit event(s) in 7 days; not throttled right now"
+    }
+    $liveStatus = if ($null -ne $clockPct -and $clockPct -lt 80) { "bad" } else { "warn" }
+    Write-Metric "Thermal Throttling" "$($throttleEvents.Count) event(s) in last 7 days" -Status $liveStatus -Note $liveNote
+} else {
+    Write-Metric "Thermal Throttling" "No events in last 7 days" -Status "ok"
+}
+if ($null -ne $clockPct) {
+    Write-Metric "CPU Clock (now)" "${clockPct}% of nominal" -Status $(if ($clockPct -lt 50 -and $throttleEvents.Count -gt 0) { "warn" } else { "info" })
 }
 
 # CPU current load
@@ -365,14 +473,25 @@ Write-Header "DISK PERFORMANCE"
 foreach ($disk in $disks) {
     Write-Metric "Disk" "$(Get-FriendlySize $disk.Size) $($disk.MediaType)" -Status "info"
 
-    # Disk temperature if available
+    # Temperature and wear if available (query this disk only, not the whole set)
     try {
-        $diskTemp = (Get-PhysicalDisk | Get-StorageReliabilityCounter -ErrorAction SilentlyContinue).Temperature
-        if ($diskTemp -and $diskTemp -gt 0) {
-            $dtStatus = if ($diskTemp -ge 60) { "bad" } elseif ($diskTemp -ge 50) { "warn" } else { "ok" }
-            Write-Metric "  Temperature" "${diskTemp}°C" -Status $dtStatus
+        $rel = $disk | Get-StorageReliabilityCounter -ErrorAction SilentlyContinue
+        if ($rel.Temperature -gt 0) {
+            $dtStatus = if ($rel.Temperature -ge 60) { "bad" } elseif ($rel.Temperature -ge 50) { "warn" } else { "ok" }
+            Write-Metric "  Temperature" "$($rel.Temperature)°C" -Status $dtStatus
+        }
+        if ($null -ne $rel.Wear -and $rel.Wear -gt 0) {
+            $wearStatus = if ($rel.Wear -ge 80) { "bad" } elseif ($rel.Wear -ge 50) { "warn" } else { "ok" }
+            Write-Metric "  Wear" "$($rel.Wear)% used" -Status $wearStatus -Note $(if ($rel.Wear -ge 80) { "SSD nearing end of life" })
         }
     } catch {}
+}
+
+# TRIM (SSD performance degrades badly without it)
+$trimOut = (fsutil behavior query DisableDeleteNotify 2>$null) -join "`n"
+if ($trimOut -match 'NTFS DisableDeleteNotify = (\d)') {
+    $trimOn = $Matches[1] -eq '0'
+    Write-Metric "TRIM (NTFS)" $(if ($trimOn) { "Enabled" } else { "DISABLED" }) -Status $(if ($trimOn) { "ok" } else { "bad" }) -Note $(if (-not $trimOn) { "Enable: fsutil behavior set DisableDeleteNotify 0" })
 }
 
 # Disk usage per volume
@@ -397,13 +516,21 @@ $planStatus = if ($planName -match "Balanced|Power saver") { "warn" } else { "ok
 $planNote   = if ($planName -match "Balanced") { "Switch to Best Performance for calls" } elseif ($planName -match "Power saver") { "Will throttle CPU heavily" } else { "" }
 Write-Metric "Active Plan" $planName -Status $planStatus -Note $planNote
 
-$procPower = powercfg /query SCHEME_CURRENT SUB_PROCESSOR 2>$null
+# powercfg returns an array of lines; join before matching, otherwise the
+# multi-line regex never matches any single line and the check silently skips.
+$procPower = (powercfg /query SCHEME_CURRENT SUB_PROCESSOR 2>$null) -join "`n"
 $minProc = if ($procPower -match "Minimum processor state[\s\S]*?Current AC Power Setting Index:\s+0x([0-9a-fA-F]+)") { [int]("0x$($Matches[1])") } else { -1 }
 $maxProc = if ($procPower -match "Maximum processor state[\s\S]*?Current AC Power Setting Index:\s+0x([0-9a-fA-F]+)") { [int]("0x$($Matches[1])") } else { -1 }
 if ($minProc -ge 0) { Write-Metric "CPU Min State (AC)" "${minProc}%" -Status "info" }
 if ($maxProc -ge 0) {
     $maxStatus = if ($maxProc -lt 100) { "warn" } else { "ok" }
     Write-Metric "CPU Max State (AC)" "${maxProc}%" -Status $maxStatus -Note $(if ($maxProc -lt 100) { "CPU is being capped!" })
+}
+
+# Fast Startup (shutdown becomes hibernate-lite; stale state survives "shutdown")
+$hib = Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power" -Name HiberbootEnabled -ErrorAction SilentlyContinue
+if ($null -ne $hib) {
+    Write-Metric "Fast Startup" $(if ($hib.HiberbootEnabled -eq 1) { "Enabled" } else { "Disabled" }) -Status "info" -Note $(if ($hib.HiberbootEnabled -eq 1) { "Use Restart (not Shutdown) for a true fresh boot" })
 }
 
 # ── 7. Security Overhead ────────────────────────────────────────────────────
@@ -495,37 +622,58 @@ Write-Header "STARTUP PROGRAMS"
 
 $startupItems = @()
 
+# Items disabled in Task Manager stay in Run/Startup but are marked disabled in
+# StartupApproved (first byte odd = disabled). Don't count those as active.
+$disabledStartup = @{}
+foreach ($approvedKey in @(
+    "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run",
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run",
+    "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder"
+)) {
+    $approved = Get-ItemProperty $approvedKey -ErrorAction SilentlyContinue
+    if ($approved) {
+        $approved.PSObject.Properties | Where-Object { $_.Name -notmatch '^PS' -and $_.Value -is [byte[]] -and $_.Value.Length -gt 0 } | ForEach-Object {
+            if (($_.Value[0] -band 1) -eq 1) { $disabledStartup[$_.Name] = $true }
+        }
+    }
+}
+
 $hkcuRun = Get-ItemProperty "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" -ErrorAction SilentlyContinue
 if ($hkcuRun) {
     $hkcuRun.PSObject.Properties | Where-Object { $_.Name -notmatch '^PS' } | ForEach-Object {
-        $startupItems += [PSCustomObject]@{ Name = $_.Name; Source = "Registry (User)" }
+        $startupItems += [PSCustomObject]@{ Name = $_.Name; Source = "Registry (User)"; Disabled = $disabledStartup.ContainsKey($_.Name) }
     }
 }
 
 $hklmRun = Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" -ErrorAction SilentlyContinue
 if ($hklmRun) {
     $hklmRun.PSObject.Properties | Where-Object { $_.Name -notmatch '^PS' } | ForEach-Object {
-        $startupItems += [PSCustomObject]@{ Name = $_.Name; Source = "Registry (System)" }
+        $startupItems += [PSCustomObject]@{ Name = $_.Name; Source = "Registry (System)"; Disabled = $disabledStartup.ContainsKey($_.Name) }
     }
 }
 
 $startupFolder = [System.IO.Path]::Combine($env:APPDATA, "Microsoft\Windows\Start Menu\Programs\Startup")
 if (Test-Path $startupFolder) {
     Get-ChildItem $startupFolder -File | ForEach-Object {
-        $startupItems += [PSCustomObject]@{ Name = $_.BaseName; Source = "Startup Folder" }
+        $startupItems += [PSCustomObject]@{ Name = $_.BaseName; Source = "Startup Folder"; Disabled = $disabledStartup.ContainsKey($_.Name) }
     }
 }
 
 $heavyApps = @("Docker Desktop", "Discord", "Spotify", "Steam", "Teams", "Slack", "OneDrive", "Figma Agent", "ShareX")
 
 foreach ($item in $startupItems | Sort-Object Name) {
+    if ($item.Disabled) {
+        Write-Metric $item.Name "$($item.Source) — disabled" -Status "info"
+        continue
+    }
     $isHeavy = $heavyApps | Where-Object { $item.Name -match [regex]::Escape($_) -or $item.Name -match ($_ -replace ' ','') }
     $status = if ($isHeavy) { "warn" } else { "info" }
     $note   = if ($isHeavy) { "Consider disabling, start manually" } else { "" }
     Write-Metric $item.Name $item.Source -Status $status -Note $note
 }
 
-Write-Metric "Total startup items" "$($startupItems.Count)" -Status $(if ($startupItems.Count -ge 8) { "warn" } else { "ok" })
+$activeStartup = @($startupItems | Where-Object { -not $_.Disabled })
+Write-Metric "Active startup items" "$($activeStartup.Count) ($($startupItems.Count) total)" -Status $(if ($activeStartup.Count -ge 8) { "warn" } else { "ok" })
 
 # ── 11. Bloat & Background Processes ────────────────────────────────────────
 
@@ -615,13 +763,17 @@ Write-Metric "Pending Reboot" $(if ($pendingReboot) { "YES" } else { "No" }) -St
 Write-Header "STABILITY"
 
 try {
-    $appCrashes = Get-WinEvent -FilterHashtable @{
-        LogName   = 'Application'
-        Id        = 1000   # Application Error
-        StartTime = (Get-Date).AddDays(-7)
-    } -MaxEvents 10 -ErrorAction SilentlyContinue
+    # Provider pinned: Id 1000 in the Application log is also used by MsiInstaller,
+    # LoadPerf and others; only 'Application Error' events are real crashes (and
+    # only its schema has the faulting app name in Properties[0]).
+    $appCrashes = @(Get-WinEvent -FilterHashtable @{
+        LogName      = 'Application'
+        ProviderName = 'Application Error'
+        Id           = 1000
+        StartTime    = (Get-Date).AddDays(-7)
+    } -MaxEvents 10 -ErrorAction Stop)
 
-    if ($appCrashes) {
+    if ($appCrashes.Count -gt 0) {
         $crashedApps = $appCrashes | ForEach-Object {
             $_.Properties[0].Value
         } | Group-Object | Sort-Object Count -Descending | Select-Object -First 5
@@ -634,24 +786,36 @@ try {
         Write-Metric "App crashes (7 days)" "None" -Status "ok"
     }
 } catch {
-    Write-Metric "App crashes" "Could not check event log" -Status "info"
+    if ($_.Exception.Message -match 'No events were found') {
+        Write-Metric "App crashes (7 days)" "None" -Status "ok"
+    } else {
+        Write-Metric "App crashes" "Could not check event log" -Status "info"
+    }
 }
 
 # BSOD check
 try {
-    $bsods = Get-WinEvent -FilterHashtable @{
-        LogName   = 'System'
-        Id        = 1001   # BugCheck
-        StartTime = (Get-Date).AddDays(-30)
-    } -MaxEvents 5 -ErrorAction SilentlyContinue
+    # Provider pinned: Id 1001 in the System log is also used by DHCP-Client,
+    # Windows Error Reporting subcomponents, etc. Real BugCheck events come from
+    # Microsoft-Windows-WER-SystemErrorReporting (shown as source "BugCheck").
+    $bsods = @(Get-WinEvent -FilterHashtable @{
+        LogName      = 'System'
+        ProviderName = 'Microsoft-Windows-WER-SystemErrorReporting'
+        Id           = 1001
+        StartTime    = (Get-Date).AddDays(-30)
+    } -MaxEvents 5 -ErrorAction Stop)
 
-    if ($bsods) {
+    if ($bsods.Count -gt 0) {
         Write-Metric "Blue Screens (30 days)" "$($bsods.Count) BSOD(s)" -Status "bad" -Note "Check minidump for details"
     } else {
         Write-Metric "Blue Screens (30 days)" "None" -Status "ok"
     }
 } catch {
-    Write-Metric "Blue Screens" "Could not check" -Status "info"
+    if ($_.Exception.Message -match 'No events were found') {
+        Write-Metric "Blue Screens (30 days)" "None" -Status "ok"
+    } else {
+        Write-Metric "Blue Screens" "Could not check" -Status "info"
+    }
 }
 
 # ── 15. Misc Services ───────────────────────────────────────────────────────
@@ -716,8 +880,8 @@ if ($electronCount -ge 3) {
 if ($planName -match "Balanced") {
     $tips += "Switch to Best Performance power mode during video calls"
 }
-if ($startupItems.Count -ge 8) {
-    $tips += "Reduce startup programs ($($startupItems.Count) currently auto-start). Open Task Manager > Startup"
+if ($activeStartup.Count -ge 8) {
+    $tips += "Reduce startup programs ($($activeStartup.Count) currently auto-start). Open Task Manager > Startup"
 }
 $bloatProcs = Get-Process | Where-Object { $_.Name -match "WidgetBoard|PhoneExperienceHost" }
 if ($bloatProcs) {
